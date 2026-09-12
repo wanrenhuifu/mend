@@ -68,37 +68,44 @@ python -m mend run "把用户列表接口的分页参数从 page 改成 offset"
 
 ## 输出长什么样
 
-跑一次是实时逐行往下滚的（每步一行，失败会多打几行报错），跑完给报告。想回看就 `mend trace`：
+跑一次是实时逐行往下滚的（每步一行），跑完给报告。想回看就 `mend trace`——下面是接 `deepseek-chat` 跑评测任务 `off_by_one` 的真实记录：
 
 ```
-运行  eval-off_by_one-181355
+运行  eval-off_by_one-234351
 任务  calc.py 里的 average() 算错了：请修好它，不要修改测试。
 仓库  D:\Code
-开始  2026-09-12 18:13:55
-结果  done  测试通过  有改动  步数 6  用时 2.2s
+开始  2026-09-12 23:43:51
+结果  done  测试通过  有改动  步数 4  用时 9.1s
 
-#0  ok   context repo_map     +  0.1s      0ms  候选文件: test_calc.py, calc.py, fake_script.json
-#1  ok   llm     step1        +  0.1s      0ms  -> read_file
-#2  ok   tool    read_file    +  0.1s      0ms  calc.py 共 13 行，显示 1-13：
-#3  ok   llm     step2        +  0.1s      0ms  -> read_file
-#4  ok   tool    read_file    +  0.1s      0ms  test_calc.py 共 13 行，显示 1-13：
-#5  ok   llm     step3        +  0.1s      0ms  -> run_command
+#0  ok   context repo_map     +  0.1s      0ms  候选文件: test_calc.py, calc.py
+#1  ok   llm     step1        +  2.0s   1893ms  -> read_file, read_file
+#2  ok   tool    read_file    +  2.0s      1ms  calc.py 共 13 行，显示 1-13：
+#3  ok   tool    read_file    +  2.0s      1ms  test_calc.py 共 13 行，显示 1-13：
+#4  ok   llm     step2        +  3.6s   1688ms  -> edit_file
+#5  ok   tool    edit_file    +  3.7s      7ms  已修改 calc.py
+#6  ok   llm     step3        +  5.3s   1634ms  -> run_command
+#7  ok   tool    run_command  +  5.8s    459ms  exit=0 (456ms)
+#8  ok   llm     step4        +  7.4s   1656ms  改了什么：calc.py 第 7 行 `for number in numbers[:-1]:` 改为 `for number in numbers:`。 为什么...
+#9  ok   tool    run_command  +  7.9s    490ms  exit=0 (487ms)
+#10 ok   verify  python -m pytest -q +  7.9s    490ms  通过 3 passed in 0.04s
+#11 ok   stop    done         +  7.9s      0ms  验证=通过  改动=有
+#12 ok   judge   expect=pass  +  8.4s      0ms  通过
+```
+
+前三列是序号 / 成败 / 类型（`context` 组装上下文、`llm` 模型决策、`tool` 工具调用、`verify` 验证门、`judge` 评测判定），后面是相对开始的时刻、耗时和一句话摘要。这次只花了 4 步：并行读两个文件、一次精确替换、自己跑一遍测试，然后交活（第 10 行是验证门再跑一次，第 12 行是评测框架的最终判定）。
+
+失败的那一步会把报错末尾几行直接打出来（省略号表示中间截断了）：
+
+```
 #6  FAIL tool    run_command  +  0.6s    546ms  exit=1 (544ms)
       ...
-      === short test summary info ===========================
       FAILED test_calc.py::test_average_of_three - assert 1.0 == 2
-      FAILED test_calc.py::test_average_of_single - assert 0.0 == 5
       2 failed, 1 passed in 0.09s
-#7  ok   llm     step4        +  0.6s      0ms  -> edit_file
-#8  ok   tool    edit_file    +  0.6s      0ms  已修改 calc.py
-#9  ok   llm     step5        +  0.6s      0ms  -> run_command
-#10 ok   tool    run_command  +  1.1s    522ms  exit=0 (521ms)
-#11 ok   llm     step6        +  1.1s      0ms  average() 的循环少算了最后一个元素（numbers[:-1]）。已改成遍历全部元素，3 个测试全部通过。
-#12 ok   tool    run_command  +  1.6s    490ms  exit=0 (489ms)
-#13 ok   verify  python -m pytest -q +  1.6s    490ms  通过 3 passed in 0.03s
-#14 ok   stop    done         +  1.6s      0ms  验证=通过  改动=有
-#15 ok   judge   expect=pass  +  2.2s      0ms  通过
 ```
+
+你不用点开任何文件就知道它为什么没通过。
+
+输出层的细节：颜色只在 TTY 下输出（管道和 CI 日志里是纯文本），工具名按权限级别上色（read 蓝 / write 黄 / shell 紫）；想控制可以用 `--color always|never`，或者按惯例设 `NO_COLOR` / `FORCE_COLOR`。报告里的"改动"只包含**这次运行改过的文件**，你自己手改的东西不会被算成它的产出。
 
 前三列是序号 / 成败 / 类型（`context` 组装上下文、`llm` 模型决策、`tool` 工具调用、`verify` 验证门、`judge` 评测判定），后面是相对开始的时刻、耗时和一句话摘要；失败的那一步会额外把报错末尾几行打出来。
 
@@ -128,7 +135,9 @@ python -m mend eval --fake      # 离线：用任务自带剧本验证整条流�
 python -m mend eval --json      # 接上真实模型后：输出可统计的结果
 ```
 
-一个任务 = 一个坏仓库（`evals/fixtures/`）+ 一句任务描述 + 一条判定命令。评测时 fixture 会被复制到临时目录并 `git init`，**你的原仓库全程不动**。目前带了一个示例任务 `off_by_one`。
+一个任务 = 一个坏仓库（`evals/fixtures/`）+ 一句任务描述 + 一条判定命令。评测时 fixture 会被复制到临时目录并 `git init`，**你的原仓库全程不动**。目前带了一个示例任务 `off_by_one`，接 `deepseek-chat` 跑的结果是 1/1、4 步、约 8 秒。任务集还很小，扩大评测集在 Roadmap 里。
+
+离线剧本放在 `evals/scripts/`，**不在任务工作区里**——最早它和坏仓库放在一起，结果真实模型会在第一步读到答案（见 [docs/design.md](docs/design.md) 的踩坑记录）。
 
 ## 配置
 

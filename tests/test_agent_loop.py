@@ -150,6 +150,35 @@ def test_patch_is_scoped_to_files_the_agent_touched(tmp_path):
     assert "dirty-b" not in result.patch  # 无关改动不该出现在产出里
 
 
+def test_patch_ignores_generated_junk(tmp_path):
+    """跑测试生成的 __pycache__ 不是 agent 的产出，不该混进报告。"""
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, capture_output=True)
+    (tmp_path / "keep.txt").write_text("before\n", encoding="utf-8")
+    (tmp_path / "gen.py").write_text(
+        "import pathlib\n"
+        "pathlib.Path('__pycache__').mkdir(exist_ok=True)\n"
+        "pathlib.Path('__pycache__/junk.pyc').write_text('x', encoding='utf-8')\n"
+        "pathlib.Path('after.txt').write_text('after\\n', encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, capture_output=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base"],
+        cwd=tmp_path,
+        capture_output=True,
+    )
+
+    cfg = Config(root=tmp_path, test_command="python -c pass", allowed_commands=["python"])
+    script = [call("run_command", command="python gen.py"), say("跑完了")]
+    trace = Trace(tmp_path, "过滤生成物")
+    agent = Agent(cfg, FakeLLM(script), ToolRegistry(tmp_path, cfg, trace), trace)
+
+    result = agent.run("生成点东西")
+
+    assert "after.txt" in result.patch  # 命令真正改出来的文件要报告
+    assert "junk.pyc" not in result.patch  # 缓存文件不算产出
+
+
 def test_patch_catches_changes_made_by_commands(tmp_path):
     """模型用 run_command 跑脚本改文件时，产出里也得体现出来。"""
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, capture_output=True)

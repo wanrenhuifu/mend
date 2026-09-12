@@ -58,7 +58,11 @@ def load_tasks(task_dir: Path | str) -> list[EvalTask]:
 
 
 def load_script(path: Path | str) -> list[Message]:
-    """把 json 剧本变成 Message 列表（离线评测用，格式见 evals/fixtures/*/fake_script.json）。"""
+    """把 json 剧本变成 Message 列表（离线评测用，格式见 evals/scripts/*.json）。
+
+    剧本放在 evals/scripts/ 而不是 fixture 目录里：fixture 会被整体复制成任务工作区，
+    剧本里写着答案，放在一起就等于把答案留在考场上。
+    """
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     messages: list[Message] = []
     for index, item in enumerate(data):

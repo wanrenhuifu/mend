@@ -137,11 +137,17 @@ class Agent:
 
         为什么要看工作区：模型可能通过 run_command（迁移脚本、formatter）改文件，
         只看写工具会漏；而运行前就已经脏的文件不该被算成它的产出。
-        两边都没有，就是这次运行什么都没改——产出为空，而不是把工作区已有的改动算进来。
+
+        为什么要过滤 forbidden_paths：跑一次 pytest 就会生成 __pycache__，
+        那不是 agent 的产出——"它碰不到的路径"和"它的产出"应该是同一个集合。
+        两边都空，就是这次运行什么都没改，产出为空。
         """
         touched = set(self.registry.touched)
         new_dirty = vcs.dirty_paths(self.cfg.root) - getattr(self, "baseline_dirty", set())
-        paths = sorted(touched | new_dirty)
+        forbidden = set(self.cfg.forbidden_paths)
+        paths = sorted(
+            path for path in (touched | new_dirty) if not (set(Path(path).parts) & forbidden)
+        )
         return vcs.diff(self.cfg.root, paths=paths) if paths else ""
 
     def _finish(self, status: str, report: str, steps: int, verified: bool = False) -> RunResult:

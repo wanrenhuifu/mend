@@ -175,6 +175,8 @@ def cmd_run(args, cfg: Config) -> int:
         print('用法: mend run "任务描述"')
         return 1
     _apply_overrides(args, cfg)
+    if getattr(args, "test_command", ""):
+        cfg.test_command = args.test_command
     _banner(cfg, task, args.fake)
     agent, trace, _ = _make_agent(cfg, task, ("read", "write", "shell"), args.fake, verify=True, live=True)
     result = agent.run(task)
@@ -183,6 +185,9 @@ def cmd_run(args, cfg: Config) -> int:
 
 def cmd_fix(args, cfg: Config) -> int:
     _apply_overrides(args, cfg)
+    if getattr(args, "test_command", ""):
+        # 显式指定的测试命令要同时作用于首轮检查和后面的验证门，否则两者会不一致
+        cfg.test_command = args.test_command
     outcome = run_tests(cfg.root, cfg, ToolRegistry(cfg.root, cfg), command=args.test_command or None)
     if outcome.ok:
         print("测试当前是绿的，没有需要修的东西。")
@@ -280,8 +285,8 @@ def build_parser() -> argparse.ArgumentParser:
             item.add_argument("task", nargs="*", help="任务描述")
         item.add_argument("--fake", action="store_true", help="用离线假模型跑通流程（不需要密钥）")
         item.add_argument("--max-steps", type=int, default=0, help="覆盖配置里的步数上限")
-        if name == "fix":
-            item.add_argument("--test-command", default="", help="指定测试命令")
+        if name in ("run", "fix"):
+            item.add_argument("--test-command", default="", help="指定判定用的测试命令（默认从 mend.toml 或自动探测）")
         if name == "review":
             item.add_argument("--base", default="HEAD", help="对比基线，默认 HEAD")
 

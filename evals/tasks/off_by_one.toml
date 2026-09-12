@@ -3,4 +3,4 @@ description = "calc.py 里的 average() 算错了：请修好它，不要修改�
 fixture = "evals/fixtures/off_by_one"
 test_command = "python -m pytest -q"
 expect = "pass"
-fake_script = "evals/fixtures/off_by_one/fake_script.json"
+fake_script = "evals/scripts/off_by_one.json"
