@@ -9,7 +9,7 @@ description = "Mend —— 会自己跑测试证明改对了的 coding agent"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "TODO: 换成你的名字" }]
+authors = [{ name = "wanrenhuifu", email = "wanrenhuifu@users.noreply.github.com" }]
 keywords = ["agent", "llm", "coding-agent", "refactoring", "pytest"]
 classifiers = [
     "Programming Language :: Python :: 3.12",

@@ -22,6 +22,7 @@ mend run "登录接口在超时后没有重试，修一下"
 ## 30 秒跑起来
 
 ```bash
+git clone https://github.com/wanrenhuifu/mend && cd mend
 python -m mend doctor                      # 环境自检
 python -m mend eval --fake                 # 离线跑通完整闭环（不需要密钥、不需要网络）
 python -m mend plan --fake "看看这个仓库"    # 看 agent 的上下文、可用工具
