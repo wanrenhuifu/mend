@@ -1,0 +1,16 @@
+# 复制成 mend.toml 使用（`mend init` 会自动生成）。
+# 注意：密钥不写在这里，只从环境变量读，避免误提交。
+
+model = "deepseek-chat"                     # qwen-max / glm-4-plus / kimi / gpt-4o-mini 都行（OpenAI 兼容）
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "MEND_API_KEY"
+
+max_steps = 25                              # 步数上限：超了就带着现状停下，交给人
+timeout_s = 60                              # 单条命令超时（秒）
+test_command = ""                           # 留空 = 自动探测 pytest / npm test / go test / cargo test
+
+# 命令白名单：只允许跑这些可执行文件（第一段命令名匹配）
+allowed_commands = ["pytest", "python", "python3", "pip", "npm", "node", "npx", "go", "cargo", "make", "ruff", "mypy", "tsc", "eslint"]
+
+# 这些目录一律不可读不可写：.git 会破坏仓库，.env 会泄露密钥，缓存目录是噪音
+forbidden_paths = [".git", ".env", ".venv", "venv", "node_modules", ".mend", "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".tox", ".idea", ".vscode"]

@@ -1,0 +1,4 @@
+# 行尾统一成 LF，避免 Windows 提交上去之后在 Linux/CI 上炸出整文件 diff
+* text=auto eol=lf
+*.png binary
+*.jpg binary

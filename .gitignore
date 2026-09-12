@@ -1,0 +1,19 @@
+# 运行轨迹与本地配置（轨迹里可能带代码片段，默认不进仓库）
+.mend/
+mend.toml
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+
+# 编辑器
+.vscode/
+.idea/

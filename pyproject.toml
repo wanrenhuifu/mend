@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mend-agent"
+version = "0.1.0"
+description = "Mend —— 会自己跑测试证明改对了的 coding agent"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "TODO: 换成你的名字" }]
+keywords = ["agent", "llm", "coding-agent", "refactoring", "pytest"]
+classifiers = [
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Quality Assurance",
+]
+# 核心零依赖：克隆下来 `python -m mend` 就能跑，30 秒可复现。
+# 见 docs/design.md 的 ADR-3：依赖越少，面试讲解和调试的成本越低。
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+mend = "mend.cli:main"
+
+[tool.setuptools]
+packages = ["mend"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
