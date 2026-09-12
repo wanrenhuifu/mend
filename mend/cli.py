@@ -14,7 +14,7 @@ from .agent import Agent, RunResult
 from .config import CONFIG_NAME, EXAMPLE_NAME, Config
 from .context import pick_files, repo_map
 from .evaluator import load_tasks, render_table, run_suite
-from .llm import DEMO_SCRIPT, FakeLLM, LLM, OpenAICompatLLM
+from .llm import DEMO_SCRIPT, LLM, FakeLLM, OpenAICompatLLM
 from .tools import ToolRegistry
 from .trace import RUNS_DIR, Trace, list_runs, load_header, load_run
 from .verify import detect_test_command, run_tests
@@ -28,6 +28,7 @@ timeout_s = 60
 test_command = ""
 allowed_commands = ["pytest", "python", "python3", "pip", "npm", "node", "npx", "go", "cargo", "make", "ruff", "mypy", "tsc", "eslint"]
 forbidden_paths = [".git", ".env", ".venv", "venv", "node_modules", ".mend", "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".tox", ".idea", ".vscode"]
+protected_paths = ["tests/", "spec/", "test_*.py", "*_test.py", "*_test.go", "conftest.py"]
 """
 
 

@@ -20,7 +20,7 @@ from pathlib import Path
 
 from .agent import Agent
 from .config import Config
-from .llm import FakeLLM, LLM, Message, OpenAICompatLLM, ToolCall
+from .llm import LLM, FakeLLM, Message, OpenAICompatLLM, ToolCall
 from .tools import ToolRegistry
 from .trace import Trace
 from .verify import run_tests

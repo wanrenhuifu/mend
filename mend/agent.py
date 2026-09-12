@@ -22,6 +22,8 @@ from .trace import Trace
 from .verify import VERIFY_TIMEOUT_S, run_tests
 
 WRITE_TOOLS = {"write_file", "edit_file"}
+# 连续这么多次同样的失败就停下交给人：再跑下去只是烧 token，问题大概率已经不在模型手里了
+MAX_SAME_FAILURE = 3
 
 _HEADER_LINE = re.compile(r"^(?:\$ .*|exit=\d+ \(.*\))\s*$", re.MULTILINE)
 _TIMING = re.compile(r"\b\d+(?:\.\d+)?\s*(?:ms|s|sec|secs|seconds?)\b")
@@ -74,7 +76,8 @@ class Agent:
         ]
         schemas = [tool.schema() for tool in self.registry.tools()]
         self.changed = False
-        failures: list[str] = []
+        last_failure: str | None = None
+        streak = 0
 
         for step in range(1, self.cfg.max_steps + 1):
             started = time.time()
@@ -116,15 +119,29 @@ class Agent:
 
             tail = check.output[-1500:]
             signature = failure_signature(check.output)
-            if failures and signature == failures[-1]:
+            streak = streak + 1 if signature == last_failure else 1
+            last_failure = signature
+
+            if streak >= MAX_SAME_FAILURE:
+                # 兜底：连续多次同一个失败，说明卡住的不是"这一行代码"，
+                # 可能是测试本身写错了，也可能思路不对——停下来交给人，比继续烧 token 好。
+                return self._finish(
+                    "stuck",
+                    f"同一个失败连续出现了 {streak} 次，我判断不出该怎么继续了，所以停下来。"
+                    "可能是测试本身有问题（比如断言写错了），也可能是我的思路不对。"
+                    f"\n\n最近一次判定输出：\n{tail[-600:]}",
+                    step,
+                )
+
+            if streak > 1:
                 nudge = (
                     "同样的失败又出现了一次。不要再重复上一轮的做法："
                     "重新读一遍相关文件和完整报错，找出真正的原因再动手。"
+                    "如果结论是测试本身写错了，就在报告里说明理由，不要再改代码去迎合它。"
                 )
             else:
                 nudge = f"测试没有通过，不能算完成。根据下面的输出继续修（禁止改测试来让它变绿）：\n\n{tail}"
             self.messages.append(Message("user", nudge))
-            failures.append(signature)
 
         return self._finish(
             "max_steps",

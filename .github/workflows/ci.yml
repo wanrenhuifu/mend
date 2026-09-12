@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # 声明的是 >= 3.11，那就真的在 3.11 上测一遍，别让下限变成一句谎话
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: 安装（含开发依赖）
+        run: pip install -e ".[dev]"
+
+      - name: lint
+        run: ruff check .
+
+      - name: 单元测试
+        run: python -m pytest -q
+
+      - name: 离线跑一遍完整闭环（不需要密钥、不需要网络）
+        run: python -m mend eval --fake

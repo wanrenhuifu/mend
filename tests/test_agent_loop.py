@@ -71,6 +71,22 @@ def test_same_failure_twice_triggers_nudge_instead_of_looping(tmp_path):
     assert result.verified and nudges
 
 
+def test_three_identical_failures_stop_instead_of_burning_steps(tmp_path):
+    """测试本身写错时，不许一路烧到步数上限：连续三次同样的失败就停下交给人。"""
+    cfg = make_cfg(tmp_path)
+    cfg.max_steps = 20
+    script = [call("write_file", path="target.txt", content="STILL BAD\n"), say("我改好了")] * 4
+    trace = Trace(tmp_path, "卡住了")
+    agent = Agent(cfg, FakeLLM(script), ToolRegistry(tmp_path, cfg, trace), trace)
+
+    result = agent.run("把 target.txt 修好")
+
+    assert result.status == "stuck"
+    assert "连续" in result.report
+    assert result.steps <= 6  # 远早于步数上限
+    assert result.verified is False
+
+
 def test_max_steps_stops(tmp_path):
     cfg = make_cfg(tmp_path, max_steps=3)
     script = [call("list_dir", path=".") for _ in range(10)]

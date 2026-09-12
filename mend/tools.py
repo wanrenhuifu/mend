@@ -7,14 +7,16 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
 import shutil
 import subprocess
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from .context import iter_files
 
@@ -71,6 +73,25 @@ def _truncate(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
     return f"{head}\n...（省略 {len(text) - len(head) - len(tail)} 字符）...\n{tail}"
 
 
+def _mentions_forbidden(command: str, names: list[str]) -> str | None:
+    """命令里是否出现了禁止访问的路径名。
+
+    为什么命令白名单之外还要查这个：白名单只管**第一段命令名**，
+    `cat .env` 和 `python -c "open('.env').read()"` 都能绕开文件工具的路径限制。
+    匹配时要求两侧是分隔符，免得把 `os.environ` 里的 ".env" 误判成路径。
+
+    注意这是纵深防御的一层，不是沙箱：真要隔离，得把命令放进容器里跑。
+    """
+    for name in names:
+        pattern = re.compile(
+            r"(?:^|[\s'\"=(/\\])" + re.escape(name) + r"(?:$|[\s'\"=)/\\,;:])",
+            re.IGNORECASE,
+        )
+        if pattern.search(command):
+            return name
+    return None
+
+
 class ToolRegistry:
     def __init__(
         self,
@@ -96,19 +117,31 @@ class ToolRegistry:
     def call(self, name: str, args: dict[str, Any], record: bool = True) -> ToolResult:
         tool = self._tools.get(name)
         if tool is None:
-            return ToolResult(False, error=f"没有这个工具: {name}；可用工具: {[t.name for t in self.tools()]}")
+            return self._reject(name, args, f"没有这个工具: {name}；可用工具: {[t.name for t in self.tools()]}", record)
         if tool.level not in self.levels:
-            return ToolResult(False, error=f"{name}（{tool.level} 级）没有挂载，当前只挂载了 {list(self.levels)}")
+            return self._reject(name, args, f"{name}（{tool.level} 级）没有挂载，当前只挂载了 {list(self.levels)}", record)
         if not isinstance(args, dict):
-            return ToolResult(False, error="参数必须是一个对象")
+            return self._reject(name, args, "参数必须是一个对象", record)
 
         allowed = set((tool.parameters.get("properties") or {}).keys())
         unknown = set(args) - allowed
         if unknown:
-            return ToolResult(False, error=f"{name} 不支持参数 {sorted(unknown)}；可用参数: {sorted(allowed)}")
+            return self._reject(name, args, f"{name} 不支持参数 {sorted(unknown)}；可用参数: {sorted(allowed)}", record)
         missing = set(tool.parameters.get("required") or []) - set(args)
         if missing:
-            return ToolResult(False, error=f"{name} 缺少参数 {sorted(missing)}")
+            return self._reject(name, args, f"{name} 缺少参数 {sorted(missing)}", record)
+
+        # 测试文件不可写：这是结构保证，不是提示词请求（见 config.is_protected 的说明）
+        path_arg = args.get("path")
+        if tool.level == "write" and isinstance(path_arg, str) and self.cfg.is_protected(path_arg):
+            return self._reject(
+                name,
+                args,
+                f"{path_arg} 是受保护的测试文件（mend.toml 里的 protected_paths），不允许修改。"
+                "如果你认为测试本身写错了，请在最终报告里说明理由，"
+                "不要把测试改成能让它通过的样子。",
+                record,
+            )
 
         started = time.time()
         try:
@@ -120,15 +153,13 @@ class ToolRegistry:
         except subprocess.SubprocessError as exc:
             result = ToolResult(False, error=f"命令执行失败: {exc}")
 
-        if result.ok and tool.level == "write":
-            path_arg = args.get("path")
-            if isinstance(path_arg, str):
-                try:
-                    relative = self._resolve(path_arg).relative_to(self.root).as_posix()
-                except (ValueError, OSError):
-                    relative = path_arg
-                if relative not in self.touched:
-                    self.touched.append(relative)
+        if result.ok and tool.level == "write" and isinstance(path_arg, str):
+            try:
+                relative = self._resolve(path_arg).relative_to(self.root).as_posix()
+            except (ValueError, OSError):
+                relative = path_arg
+            if relative not in self.touched:
+                self.touched.append(relative)
 
         if self.trace is not None and record:
             self.trace.record(
@@ -143,6 +174,20 @@ class ToolRegistry:
         return result
 
     # ---------- 内部：路径安全 ----------
+
+    def _reject(self, name: str, args: Any, reason: str, record: bool = True) -> ToolResult:
+        """被拒绝的调用也要进轨迹："它试图改测试文件"和"它改成功了"一样值得被 review。"""
+        if self.trace is not None and record:
+            self.trace.record(
+                "tool",
+                name,
+                False,
+                0,
+                args=args if isinstance(args, dict) else None,
+                result=reason,
+                rejected=True,
+            )
+        return ToolResult(False, error=reason)
 
     def _resolve(self, path: str) -> Path:
         """把路径解析到仓库内；越界或命中禁写目录直接抛错，而不是"尽量执行"。"""
@@ -247,6 +292,9 @@ class ToolRegistry:
         allowed = {name.lower() for name in self.cfg.allowed_commands}
         if Path(parts[0]).name.lower() not in allowed:
             return ToolResult(False, error=f"{parts[0]} 不在白名单里；允许: {sorted(allowed)}")
+        touched = _mentions_forbidden(command, self.cfg.forbidden_paths)
+        if touched:
+            return ToolResult(False, error=f"命令里出现了禁止访问的路径 {touched}（mend.toml 的 forbidden_paths）")
         exe = shutil.which(parts[0])  # Windows 上要这样解析 .cmd / .exe
         if not exe:
             return ToolResult(False, error=f"找不到可执行文件: {parts[0]}")
@@ -257,6 +305,8 @@ class ToolRegistry:
             proc = subprocess.run(
                 [exe, *parts[1:]],
                 cwd=self.root,
+                # 不把 API key 交给子进程：不是靠字符串匹配挡住它，而是根本不传给它
+                env={key: value for key, value in os.environ.items() if key != self.cfg.api_key_env},
                 capture_output=True,
                 text=True,
                 encoding="utf-8",

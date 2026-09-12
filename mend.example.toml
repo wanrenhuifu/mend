@@ -14,3 +14,9 @@ allowed_commands = ["pytest", "python", "python3", "pip", "npm", "node", "npx", 
 
 # 这些目录一律不可读不可写：.git 会破坏仓库，.env 会泄露密钥，缓存目录是噪音
 forbidden_paths = [".git", ".env", ".venv", "venv", "node_modules", ".mend", "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".tox", ".idea", ".vscode"]
+
+# 测试文件在工具层不可写（结尾带 / 表示目录，其余按文件名 glob 匹配）。
+# 这是"禁止改测试来让测试变绿"的结构保证，不依赖提示词。
+# 注意：默认不保护 pytest.ini / pyproject.toml 这类配置文件，因为 agent 经常要合法地
+# 改它们（加依赖、改打包配置）；想更严就自己加进去。
+protected_paths = ["tests/", "spec/", "test_*.py", "*_test.py", "*_test.go", "conftest.py"]

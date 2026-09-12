@@ -36,3 +36,10 @@ addopts = "-q"
 [tool.ruff]
 line-length = 110
 target-version = "py311"
+
+[tool.ruff.lint]
+# 显式声明规则集，不吃 ruff 的默认值：ruff 每个大版本都会扩默认规则，
+# 依赖默认值意味着"某天升级 ruff 之后 CI 突然变红，而代码一行没改"。
+select = ["E", "F", "W", "I", "UP", "B"]
+# 行长交给编辑器/formatter，上面的 line-length 只用于 formatter 的对齐。
+ignore = ["E501"]
