@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+
 from mend.agent import Agent, failure_signature
 from mend.config import Config
 from mend.llm import FakeLLM, call, say
@@ -104,7 +106,8 @@ def test_trace_is_written_to_disk(tmp_path):
 
     assert trace.path.exists()
     content = trace.path.read_text(encoding="utf-8")
-    assert '"kind": "stop"' in content.replace("'", '"')
+    assert '"kind": "run"' in content  # 第一行是运行头：任务 / 仓库 / 起始时间
+    assert '"kind": "stop"' in content
 
 
 def test_no_test_command_means_no_claim_of_success(tmp_path):
@@ -120,3 +123,77 @@ def test_no_test_command_means_no_claim_of_success(tmp_path):
     assert result.status == "no_verifier"
     assert result.verified is False
     assert "不能声称完成" in result.report
+
+
+def test_patch_is_scoped_to_files_the_agent_touched(tmp_path):
+    """报告里只该出现它自己改过的文件，别把工作区里已有的改动算成它的产出。"""
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, capture_output=True)
+    (tmp_path / "a.txt").write_text("old-a\n", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("old-b\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, capture_output=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base"],
+        cwd=tmp_path,
+        capture_output=True,
+    )
+    (tmp_path / "b.txt").write_text("dirty-b\n", encoding="utf-8")  # 跟这次运行无关的改动
+
+    cfg = Config(root=tmp_path, test_command="python -c pass", allowed_commands=["python"])
+    script = [call("write_file", path="a.txt", content="new-a\n"), say("改好了")]
+    trace = Trace(tmp_path, "只报自己改的文件")
+    agent = Agent(cfg, FakeLLM(script), ToolRegistry(tmp_path, cfg, trace), trace)
+
+    result = agent.run("把 a.txt 改掉")
+
+    assert result.verified
+    assert "new-a" in result.patch
+    assert "dirty-b" not in result.patch  # 无关改动不该出现在产出里
+
+
+def test_patch_catches_changes_made_by_commands(tmp_path):
+    """模型用 run_command 跑脚本改文件时，产出里也得体现出来。"""
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, capture_output=True)
+    (tmp_path / "target.txt").write_text("before\n", encoding="utf-8")
+    (tmp_path / "rewrite.py").write_text(
+        "import pathlib\npathlib.Path('target.txt').write_text('after\\n', encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, capture_output=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base"],
+        cwd=tmp_path,
+        capture_output=True,
+    )
+
+    cfg = Config(root=tmp_path, test_command="python -c pass", allowed_commands=["python"])
+    script = [call("run_command", command="python rewrite.py"), say("改完了")]
+    trace = Trace(tmp_path, "用命令改文件")
+    agent = Agent(cfg, FakeLLM(script), ToolRegistry(tmp_path, cfg, trace), trace)
+
+    result = agent.run("把 target.txt 改掉")
+
+    assert "+after" in result.patch
+
+
+def test_no_changes_means_empty_patch(tmp_path):
+    """什么都没改的运行，产出应该是空的——不能把工作区里已有的改动算成它的产出。"""
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, capture_output=True)
+    (tmp_path / "a.txt").write_text("a\n", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("old-b\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, capture_output=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base"],
+        cwd=tmp_path,
+        capture_output=True,
+    )
+    (tmp_path / "b.txt").write_text("dirty-b\n", encoding="utf-8")  # 运行前就脏的文件
+
+    cfg = Config(root=tmp_path, test_command="python -c pass", allowed_commands=["python"])
+    script = [call("read_file", path="a.txt"), say("只是看了一眼")]
+    trace = Trace(tmp_path, "什么都不改")
+    agent = Agent(cfg, FakeLLM(script), ToolRegistry(tmp_path, cfg, trace), trace)
+
+    result = agent.run("看一眼 a.txt")
+
+    assert result.status == "done"
+    assert result.patch == ""

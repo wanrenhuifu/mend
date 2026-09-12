@@ -9,14 +9,14 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from . import __version__, vcs
+from . import __version__, ui, vcs
 from .agent import Agent, RunResult
 from .config import CONFIG_NAME, EXAMPLE_NAME, Config
 from .context import pick_files, repo_map
 from .evaluator import load_tasks, render_table, run_suite
 from .llm import DEMO_SCRIPT, FakeLLM, LLM, OpenAICompatLLM
 from .tools import ToolRegistry
-from .trace import RUNS_DIR, Trace, list_runs, load_run, render
+from .trace import RUNS_DIR, Trace, list_runs, load_header, load_run
 from .verify import detect_test_command, run_tests
 
 DEFAULT_CONFIG_TOML = """# Mend 配置（`mend init` 生成）。密钥不写在这里，只从环境变量读。
@@ -54,8 +54,16 @@ def _build_llm(cfg: Config, use_fake: bool, script: list | None = None) -> LLM:
     return OpenAICompatLLM(cfg.model, cfg.base_url, cfg.api_key)
 
 
-def _make_agent(cfg: Config, task: str, levels: tuple[str, ...], use_fake: bool, verify: bool):
-    trace = Trace(cfg.root, task)
+def _make_agent(
+    cfg: Config,
+    task: str,
+    levels: tuple[str, ...],
+    use_fake: bool,
+    verify: bool,
+    live: bool = False,
+):
+    """live=True 时每跑一步就在终端打一行——否则长任务看起来像死了。"""
+    trace = Trace(cfg.root, task, on_step=ui.print_step if live else None)
     registry = ToolRegistry(cfg.root, cfg, trace, levels=levels)
     agent = Agent(cfg, _build_llm(cfg, use_fake), registry, trace, verify=verify)
     return agent, trace, registry
@@ -70,22 +78,38 @@ def _task_text(args) -> str:
     return " ".join(getattr(args, "task", []) or []).strip()
 
 
-def _render_trace(trace: Trace) -> str:
-    return render([asdict(step) for step in trace.steps])
+def _section(title: str) -> None:
+    print()
+    print(ui.console.paint(title, ui.BOLD, ui.CYAN))
+
+
+def _banner(cfg: Config, task: str, use_fake: bool) -> None:
+    model = "离线假模型（--fake）" if use_fake else f"{cfg.model} @ {cfg.base_url}"
+    print(ui.console.paint(f"任务  {task[:76]}", ui.BOLD))
+    print(ui.console.paint(f"模型  {model}    步数上限 {cfg.max_steps}", ui.GREY))
+    print()
 
 
 def _report(result: RunResult, trace: Trace) -> int:
-    print("\n=== 结果 ===")
-    verified = "测试通过" if result.verified else "未验证"
-    print(f"状态: {result.status}    验证: {verified}    步数: {result.steps}")
-    print(f"轨迹回放: mend trace {trace.run_id}")
+    _section("结果")
+    status = ui.console.paint(result.status, ui.GREEN if result.status == "done" else ui.YELLOW)
+    verified = (
+        ui.console.paint("测试通过", ui.GREEN)
+        if result.verified
+        else ui.console.paint("未验证", ui.YELLOW)
+    )
+    print(f"状态: {status}    验证: {verified}    步数: {result.steps}")
+    print(ui.console.paint(f"轨迹回放: mend trace {trace.run_id}", ui.GREY))
     if result.report:
-        print(f"\n=== agent 的说明 ===\n{result.report}")
+        _section("agent 的说明")
+        print(result.report)
     if result.patch.strip():
-        print(f"\n=== 改动 ===\n{result.patch[:4000]}")
+        _section("改动")
+        print(ui.colorize_diff(result.patch[:4000]))
     usage = result.usage or {}
     if usage.get("prompt_tokens") or usage.get("completion_tokens"):
-        print(f"\n=== 用量 ===\nprompt={usage.get('prompt_tokens', 0)}  completion={usage.get('completion_tokens', 0)}")
+        _section("用量")
+        print(f"prompt={usage.get('prompt_tokens', 0)}  completion={usage.get('completion_tokens', 0)}")
     return 0 if result.status == "done" else 1
 
 
@@ -116,7 +140,8 @@ def cmd_doctor(args, cfg: Config) -> int:
         ("测试命令", test_command or "没探测到（在 mend.toml 里写 test_command）", bool(test_command)),
     ]
     for name, value, ok in checks:
-        print(f"[{'ok' if ok else '!!'}] {name}: {value}")
+        mark = ui.console.paint("[ok]", ui.GREEN) if ok else ui.console.paint("[!!]", ui.YELLOW)
+        print(f"{mark} {name}: {value}")
     return 0 if sys.version_info >= (3, 11) else 1
 
 
@@ -127,18 +152,20 @@ def cmd_plan(args, cfg: Config) -> int:
         return 1
     _apply_overrides(args, cfg)
     root = Path(cfg.root).resolve()
-    print("=== 上下文（agent 会看到这些）===")
+    _section("上下文（agent 会看到这些）")
     print(repo_map(root, cfg))
     hints = [path.relative_to(root).as_posix() for path in pick_files(root, cfg, task)]
-    print("\n=== 关键词初筛出的文件 ===")
+    _section("关键词初筛出的文件")
     print("\n".join(f"- {h}" for h in hints) or "- （没有命中，agent 得自己找）")
 
     agent, trace, registry = _make_agent(cfg, task, ("read",), args.fake, verify=False)
-    print(f"\n=== 只读工具（{len(registry.tools())} 个）===")
+    _section(f"只读工具（{len(registry.tools())} 个）")
     print(", ".join(tool.name for tool in registry.tools()))
     result = agent.run(task)
-    print(f"\n=== 轨迹 ===\n{_render_trace(trace)}")
-    print(f"\n=== 计划 ===\n{result.report}")
+    _section("轨迹")
+    print(ui.render_run(trace.records()))
+    _section("计划")
+    print(result.report)
     return 0
 
 
@@ -148,7 +175,8 @@ def cmd_run(args, cfg: Config) -> int:
         print('用法: mend run "任务描述"')
         return 1
     _apply_overrides(args, cfg)
-    agent, trace, _ = _make_agent(cfg, task, ("read", "write", "shell"), args.fake, verify=True)
+    _banner(cfg, task, args.fake)
+    agent, trace, _ = _make_agent(cfg, task, ("read", "write", "shell"), args.fake, verify=True, live=True)
     result = agent.run(task)
     return _report(result, trace)
 
@@ -159,9 +187,9 @@ def cmd_fix(args, cfg: Config) -> int:
     if outcome.ok:
         print("测试当前是绿的，没有需要修的东西。")
         return 0
-    print(f"测试失败，进入修复循环（{outcome.command}）")
+    print(f"测试失败，进入修复循环（{ui.console.paint(outcome.command, ui.BOLD)}）")
     task = "下面这些测试失败了，请把它们修到通过。不要修改测试本身。\n\n" + outcome.output[-3000:]
-    agent, trace, _ = _make_agent(cfg, task, ("read", "write", "shell"), args.fake, verify=True)
+    agent, trace, _ = _make_agent(cfg, task, ("read", "write", "shell"), args.fake, verify=True, live=True)
     result = agent.run(task)
     return _report(result, trace)
 
@@ -177,6 +205,8 @@ def cmd_review(args, cfg: Config) -> int:
     )
     agent, trace, _ = _make_agent(cfg, task, ("read",), args.fake, verify=False)
     result = agent.run(task)
+    _section("审查记录")
+    print(ui.render_run(trace.records()))
     return _report(result, trace)
 
 
@@ -188,13 +218,19 @@ def cmd_trace(args, cfg: Config) -> int:
             return 0
         print(f"共 {len(runs)} 次运行（最新的在前）：")
         for path in runs[:20]:
-            print(f"  {path.stem}")
+            header = load_header(path)
+            task = " ".join((header.get("task") or "").split())
+            print(
+                f"  {path.stem}  "
+                f"{ui.console.paint(header.get('started', ''), ui.GREY)}  "
+                f"{task[:46]}"
+            )
         return 0
     path = Path(cfg.root).resolve() / RUNS_DIR / f"{args.run_id}.jsonl"
     if not path.exists():
         print(f"没有这次运行: {args.run_id}（用 mend trace --list 看有哪些）")
         return 1
-    print(render(load_run(path)))
+    print(ui.render_run(load_run(path)))
     return 0
 
 
@@ -219,12 +255,19 @@ def build_parser() -> argparse.ArgumentParser:
         description="Mend —— 会自己跑测试证明改对了的 coding agent",
     )
     parser.add_argument("--version", action="version", version=f"mend {__version__}")
+    # --color 两边都能写：`mend --color never run ...` 和 `mend run --color never ...` 都成立。
+    # 子命令那一份用 SUPPRESS 做默认值，否则子解析器会把顶层的取值覆盖回 auto。
+    color_help = "颜色输出：auto（默认，不是 TTY 就关）/ always / never。也认 NO_COLOR 和 FORCE_COLOR"
+    parser.add_argument("--color", choices=["auto", "always", "never"], default="auto", help=color_help)
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--color", choices=["auto", "always", "never"], default=argparse.SUPPRESS, help=color_help)
+
     sub = parser.add_subparsers(dest="command", metavar="<命令>")
 
-    init = sub.add_parser("init", help="生成 mend.toml 配置")
+    init = sub.add_parser("init", parents=[common], help="生成 mend.toml 配置")
     init.add_argument("--force", action="store_true", help="覆盖已存在的配置")
 
-    sub.add_parser("doctor", help="环境自检：Python / git / 密钥 / 测试命令")
+    sub.add_parser("doctor", parents=[common], help="环境自检：Python / git / 密钥 / 测试命令")
 
     for name, help_text in (
         ("plan", "只读模式：读仓库、给计划，不改任何代码"),
@@ -232,7 +275,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("fix", "把当前失败的测试修到通过"),
         ("review", "审查当前 diff（只读，只给意见）"),
     ):
-        item = sub.add_parser(name, help=help_text)
+        item = sub.add_parser(name, parents=[common], help=help_text)
         if name != "review":
             item.add_argument("task", nargs="*", help="任务描述")
         item.add_argument("--fake", action="store_true", help="用离线假模型跑通流程（不需要密钥）")
@@ -242,11 +285,11 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "review":
             item.add_argument("--base", default="HEAD", help="对比基线，默认 HEAD")
 
-    trace = sub.add_parser("trace", help="列出/回放历史运行轨迹")
+    trace = sub.add_parser("trace", parents=[common], help="列出/回放历史运行轨迹")
     trace.add_argument("run_id", nargs="?", default="", help="运行 id，不带就列出全部")
     trace.add_argument("--list", action="store_true", help="只列出来")
 
-    evaluate = sub.add_parser("eval", help="跑评测集：把每个坏仓库修好并判定")
+    evaluate = sub.add_parser("eval", parents=[common], help="跑评测集：把每个坏仓库修好并判定")
     evaluate.add_argument("--fake", action="store_true", help="离线跑（用任务自带的剧本）")
     evaluate.add_argument("--task", default="", help="只跑某个任务")
     evaluate.add_argument("--json", action="store_true", help="额外输出 json")
@@ -258,6 +301,7 @@ def main(argv: list[str] | None = None) -> int:
     _soften_console()
     parser = build_parser()
     args = parser.parse_args(argv)
+    ui.configure(getattr(args, "color", "auto"))
     if not getattr(args, "command", None):
         parser.print_help()
         return 1

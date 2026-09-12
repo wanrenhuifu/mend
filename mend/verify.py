@@ -36,14 +36,25 @@ def detect_test_command(root: Path | str) -> str | None:
     return None
 
 
-def run_tests(root, cfg, registry, command: str | None = None, timeout_s: int = VERIFY_TIMEOUT_S, trace=None) -> VerifyResult:
-    """跑判定命令。故意走 registry，这样它和白名单、超时、轨迹是同一套约束。"""
+def run_tests(
+    root,
+    cfg,
+    registry,
+    command: str | None = None,
+    timeout_s: int = VERIFY_TIMEOUT_S,
+    trace=None,
+    record_tool: bool = True,
+) -> VerifyResult:
+    """跑判定命令。故意走 registry，这样它和白名单、超时、轨迹是同一套约束。
+
+    record_tool=False 用于评测框架自己的最终判定：那是框架的动作，不该记进 agent 的轨迹。
+    """
     resolved = command or cfg.test_command_or_none() or detect_test_command(root)
     if not resolved:
         result = VerifyResult(False, reason="没有探测到测试命令；在 mend.toml 里写 test_command，或先补一个最小复现测试")
     else:
         started = time.time()
-        outcome = registry.call("run_command", {"command": resolved, "timeout_s": timeout_s})
+        outcome = registry.call("run_command", {"command": resolved, "timeout_s": timeout_s}, record=record_tool)
         result = VerifyResult(
             ok=outcome.ok,
             command=resolved,

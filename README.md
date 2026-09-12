@@ -24,7 +24,8 @@ mend run "登录接口在超时后没有重试，修一下"
 ```bash
 python -m mend doctor                      # 环境自检
 python -m mend eval --fake                 # 离线跑通完整闭环（不需要密钥、不需要网络）
-python -m mend plan --fake "看看这个仓库"    # 看 agent 的上下文、可用工具和轨迹
+python -m mend plan --fake "看看这个仓库"    # 看 agent 的上下文、可用工具
+python -m mend trace --list                # 看历史运行记录，挑一次回放
 ```
 
 核心零依赖，只要 Python >= 3.11 就能跑。接上真实模型：
@@ -63,6 +64,44 @@ python -m mend run "把用户列表接口的分页参数从 page 改成 offset"
  │    通过 -> 结束；失败 -> 回灌报错，回到 llm
  └─ stop     输出说明 + diff + 轨迹
 ```
+
+## 输出长什么样
+
+跑一次是实时逐行往下滚的（每步一行，失败会多打几行报错），跑完给报告。想回看就 `mend trace`：
+
+```
+运行  eval-off_by_one-181355
+任务  calc.py 里的 average() 算错了：请修好它，不要修改测试。
+仓库  D:\Code
+开始  2026-09-12 18:13:55
+结果  done  测试通过  有改动  步数 6  用时 2.2s
+
+#0  ok   context repo_map     +  0.1s      0ms  候选文件: test_calc.py, calc.py, fake_script.json
+#1  ok   llm     step1        +  0.1s      0ms  -> read_file
+#2  ok   tool    read_file    +  0.1s      0ms  calc.py 共 13 行，显示 1-13：
+#3  ok   llm     step2        +  0.1s      0ms  -> read_file
+#4  ok   tool    read_file    +  0.1s      0ms  test_calc.py 共 13 行，显示 1-13：
+#5  ok   llm     step3        +  0.1s      0ms  -> run_command
+#6  FAIL tool    run_command  +  0.6s    546ms  exit=1 (544ms)
+      ...
+      === short test summary info ===========================
+      FAILED test_calc.py::test_average_of_three - assert 1.0 == 2
+      FAILED test_calc.py::test_average_of_single - assert 0.0 == 5
+      2 failed, 1 passed in 0.09s
+#7  ok   llm     step4        +  0.6s      0ms  -> edit_file
+#8  ok   tool    edit_file    +  0.6s      0ms  已修改 calc.py
+#9  ok   llm     step5        +  0.6s      0ms  -> run_command
+#10 ok   tool    run_command  +  1.1s    522ms  exit=0 (521ms)
+#11 ok   llm     step6        +  1.1s      0ms  average() 的循环少算了最后一个元素（numbers[:-1]）。已改成遍历全部元素，3 个测试全部通过。
+#12 ok   tool    run_command  +  1.6s    490ms  exit=0 (489ms)
+#13 ok   verify  python -m pytest -q +  1.6s    490ms  通过 3 passed in 0.03s
+#14 ok   stop    done         +  1.6s      0ms  验证=通过  改动=有
+#15 ok   judge   expect=pass  +  2.2s      0ms  通过
+```
+
+前三列是序号 / 成败 / 类型（`context` 组装上下文、`llm` 模型决策、`tool` 工具调用、`verify` 验证门、`judge` 评测判定），后面是相对开始的时刻、耗时和一句话摘要；失败的那一步会额外把报错末尾几行打出来。
+
+输出层的细节：颜色只在 TTY 下输出（管道和 CI 日志里是纯文本），工具名按权限级别上色（read 蓝 / write 黄 / shell 紫）；想要控制可以用 `--color always|never`，或者按惯例设 `NO_COLOR` / `FORCE_COLOR`。报告里的"改动"只包含**这次运行改过的文件**，你自己手改的东西不会被算成它的产出。
 
 ## 设计取舍（面试会问的五个问题）
 
@@ -104,6 +143,7 @@ mend/
 ├── context.py    # 仓库地图 + 关键词初筛
 ├── verify.py     # 跑测试并判定
 ├── llm.py        # LLM 抽象 + OpenAI 兼容实现 + 离线假模型
+├── ui.py         # 输出层：颜色 / 运行记录排版 / diff 上色
 ├── trace.py      # 轨迹落盘与回放
 ├── evaluator.py  # 评测集
 ├── config.py     # 配置：默认值 <- mend.toml <- 环境变量

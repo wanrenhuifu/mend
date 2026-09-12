@@ -83,6 +83,7 @@ class ToolRegistry:
         self.cfg = cfg
         self.trace = trace
         self.levels = tuple(levels)
+        self.touched: list[str] = []  # 本次运行改过的文件，用来把 diff 收窄到"它自己改的"
         self._tools: dict[str, Tool] = {}
         self._register_all()
 
@@ -92,7 +93,7 @@ class ToolRegistry:
         """只返回已挂载级别的工具（模型能看到的 schema 就从这里来）。"""
         return [tool for tool in self._tools.values() if tool.level in self.levels]
 
-    def call(self, name: str, args: dict[str, Any]) -> ToolResult:
+    def call(self, name: str, args: dict[str, Any], record: bool = True) -> ToolResult:
         tool = self._tools.get(name)
         if tool is None:
             return ToolResult(False, error=f"没有这个工具: {name}；可用工具: {[t.name for t in self.tools()]}")
@@ -119,12 +120,23 @@ class ToolRegistry:
         except subprocess.SubprocessError as exc:
             result = ToolResult(False, error=f"命令执行失败: {exc}")
 
-        if self.trace is not None:
+        if result.ok and tool.level == "write":
+            path_arg = args.get("path")
+            if isinstance(path_arg, str):
+                try:
+                    relative = self._resolve(path_arg).relative_to(self.root).as_posix()
+                except (ValueError, OSError):
+                    relative = path_arg
+                if relative not in self.touched:
+                    self.touched.append(relative)
+
+        if self.trace is not None and record:
             self.trace.record(
                 "tool",
                 tool.name,
                 result.ok,
                 int((time.time() - started) * 1000),
+                level=tool.level,  # 让输出层能按权限级别上色
                 args=args,
                 result=_truncate(result.text(), 400),
             )

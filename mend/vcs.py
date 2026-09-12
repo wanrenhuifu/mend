@@ -42,15 +42,48 @@ def status(root: Path | str) -> str:
     return out.strip() if code == 0 else f"(git status 失败: {out.strip()[:200]})"
 
 
-def diff(root: Path | str, base: str = "HEAD") -> str:
-    """已跟踪文件的改动 + 未跟踪的新文件，都算进这次运行的产出。"""
+def dirty_paths(root: Path | str) -> set[str]:
+    """当前有改动的文件（含未跟踪）。
+
+    用来在运行前后取差集，隔离出"这次运行到底改了什么"——
+    不能只看写文件工具，因为模型也可能用 run_command 跑脚本或 formatter 改文件。
+    """
+    if not is_repo(root):
+        return set()
+    code, out = _git(root, "status", "--porcelain", "--untracked-files=all")
+    if code != 0:
+        return set()
+    paths: set[str] = set()
+    for line in out.splitlines():
+        if len(line) < 4:
+            continue
+        entry = line[3:].strip()
+        if "->" in entry:  # 重命名：只关心新名字
+            entry = entry.split("->", 1)[1].strip()
+        if entry:
+            paths.add(entry.strip('"'))
+    return paths
+
+
+def diff(root: Path | str, base: str = "HEAD", paths: list[str] | None = None) -> str:
+    """工作区相对 base 的改动。
+
+    paths 不为空时只报这些文件——这样报告里出现的是"这次运行改了什么"，
+    而不是工作区里所有未提交的改动（包括你自己手动改的）。
+    """
     if not is_repo(root):
         return ""
-    code, tracked = _git(root, "diff", base)
+    args = ["diff", base]
+    if paths:
+        args += ["--", *paths]
+    code, tracked = _git(root, *args)
     if code != 0:
         tracked = f"(git diff 失败: {tracked.strip()[:200]})"
     _, short = _git(root, "status", "--short", "--untracked-files=all")
     untracked = [line[3:].strip() for line in short.splitlines() if line.startswith("??")]
+    if paths:
+        wanted = set(paths)
+        untracked = [path for path in untracked if path in wanted]
     if untracked:
-        tracked += "\n# 新增文件（还没有加入 git）\n" + "\n".join(f"?? {p}" for p in untracked)
+        tracked += "\n# 新增文件（还没有加入 git）\n" + "\n".join(f"?? {path}" for path in untracked)
     return tracked.strip()

@@ -122,8 +122,10 @@ def run_suite(
             result = agent.run(task.description)
             seconds = time.time() - started
 
-            # 最终判定是评测框架的动作，不是 agent 的动作：不记成 verify，单独记一条 judge
-            outcome = run_tests(work, task_cfg, registry, command=task.test_command or None, trace=None)
+            # 最终判定是评测框架的动作，不是 agent 的动作：不进 agent 的轨迹，单独记一条 judge
+            outcome = run_tests(
+                work, task_cfg, registry, command=task.test_command or None, trace=None, record_tool=False
+            )
             ok = outcome.ok if task.expect == "pass" else not outcome.ok
             note = "" if ok else ("判定命令仍然失败" if task.expect == "pass" else "判定命令意外通过了")
             trace.record("judge", f"expect={task.expect}", ok, note=note or None)

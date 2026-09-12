@@ -44,10 +44,12 @@ def test_plan_fake_shows_context_and_tools(monkeypatch, tmp_path, capsys):
     assert cli.main(["plan", "看看这个仓库", "--fake"]) == 0
 
     output = capsys.readouterr().out
-    assert "calc.py" in output          # 上下文里有仓库地图
+    assert "calc.py" in output  # 上下文里有仓库地图
     assert "只读工具" in output
-    assert "read_file" in output        # 只读模式下挂载的工具
-    assert "run_command" not in output.split("=== 只读工具")[1].split("===")[0]
+    tools_line = next(line for line in output.splitlines() if "list_dir" in line)
+    assert "read_file" in tools_line
+    assert "run_command" not in tools_line  # 只读模式挂不到 shell 工具
+    assert "edit_file" not in tools_line
 
 
 def test_run_fake_full_path(monkeypatch, tmp_path, capsys):
@@ -67,7 +69,21 @@ def test_trace_list_after_run(monkeypatch, tmp_path, capsys):
     cli.main(["plan", "看看仓库", "--fake"])
     capsys.readouterr()
     assert cli.main(["trace", "--list"]) == 0
-    assert "次运行" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "次运行" in output
+    assert "看看仓库" in output  # 列表里直接能看到任务，不用打开文件
+
+
+def test_color_can_be_forced_and_disabled(monkeypatch, tmp_path, capsys):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "calc.py").write_text("x = 1\n", encoding="utf-8")
+
+    assert cli.main(["--color", "always", "doctor"]) == 0
+    assert "\033[32m" in capsys.readouterr().out  # [ok] 是绿的
+
+    # 子命令后面也能写
+    assert cli.main(["doctor", "--color", "never"]) == 0
+    assert "\033[" not in capsys.readouterr().out
 
 
 def test_eval_fake_runs_bundled_task(monkeypatch, capsys):

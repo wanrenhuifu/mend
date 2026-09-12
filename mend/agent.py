@@ -62,6 +62,8 @@ class Agent:
 
     def run(self, task: str) -> RunResult:
         root = Path(self.cfg.root).resolve()
+        # 记下开场时工作区里已经脏了的文件，结束时才能把它们和"本次产出"区分开
+        self.baseline_dirty = vcs.dirty_paths(root)
         hints = [path.relative_to(root).as_posix() for path in pick_files(root, self.cfg, task)]
         map_text = repo_map(root, self.cfg)
         self.trace.record("context", "repo_map", hints=hints[:8] or None)
@@ -130,6 +132,18 @@ class Agent:
             self.cfg.max_steps,
         )
 
+    def _patch(self) -> str:
+        """产出 = 写工具碰过的文件 ∪ 本次运行期间新变脏的文件。
+
+        为什么要看工作区：模型可能通过 run_command（迁移脚本、formatter）改文件，
+        只看写工具会漏；而运行前就已经脏的文件不该被算成它的产出。
+        两边都没有，就是这次运行什么都没改——产出为空，而不是把工作区已有的改动算进来。
+        """
+        touched = set(self.registry.touched)
+        new_dirty = vcs.dirty_paths(self.cfg.root) - getattr(self, "baseline_dirty", set())
+        paths = sorted(touched | new_dirty)
+        return vcs.diff(self.cfg.root, paths=paths) if paths else ""
+
     def _finish(self, status: str, report: str, steps: int, verified: bool = False) -> RunResult:
         self.trace.record("stop", status, steps=steps, verified=verified, changed=getattr(self, "changed", False))
         return RunResult(
@@ -138,6 +152,6 @@ class Agent:
             run_id=self.trace.run_id,
             steps=steps,
             verified=verified,
-            patch=vcs.diff(self.cfg.root),
+            patch=self._patch(),
             usage=dict(self.llm.usage),
         )
