@@ -44,6 +44,7 @@ class EvalRow:
     steps: int = 0
     seconds: float = 0.0
     note: str = ""
+    skipped: bool = False  # 离线模式下没有剧本、直接跳过的任务
 
 
 def load_tasks(task_dir: Path | str) -> list[EvalTask]:
@@ -106,6 +107,13 @@ def run_suite(
     for task in tasks:
         if only and task.id != only:
             continue
+        # 离线模式只跑带剧本的任务：假模型没有剧本时什么也不做，"失败"没有信息量。
+        # 更实际的原因：加新任务时不该顺手把 CI 弄红（CI 里跑的就是 --fake）。
+        if use_fake and not task.fake_script:
+            rows.append(
+                EvalRow(task.id, True, "skipped", skipped=True, note="离线模式跳过（任务没有 fake_script）")
+            )
+            continue
         fixture = project_root / task.fixture
         if not fixture.exists():
             rows.append(EvalRow(task.id, False, note=f"fixture 不存在: {task.fixture}"))
@@ -146,10 +154,15 @@ def render_table(rows: list[EvalRow]) -> str:
     width = max(len(row.id) for row in rows)
     lines = [f"{'任务'.ljust(width)}  结果  状态         步数  耗时"]
     for row in rows:
+        verdict = "--" if row.skipped else ("通过" if row.ok else "失败")
         lines.append(
-            f"{row.id.ljust(width)}  {'通过' if row.ok else '失败'}  "
+            f"{row.id.ljust(width)}  {verdict}  "
             f"{row.status:<10}  {row.steps:>3}  {row.seconds:>5}s  {row.note}"
         )
-    passed = sum(1 for row in rows if row.ok)
-    lines.append(f"\n通过 {passed}/{len(rows)}")
+    graded = [row for row in rows if not row.skipped]
+    passed = sum(1 for row in graded if row.ok)
+    summary = f"\n通过 {passed}/{len(graded)}"
+    if len(graded) != len(rows):
+        summary += f"（另 {len(rows) - len(graded)} 个任务离线跳过）"
+    lines.append(summary)
     return "\n".join(lines)

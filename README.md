@@ -144,6 +144,14 @@ python -m mend eval --json      # 接上真实模型后：输出可统计的结�
 
 离线剧本放在 `evals/scripts/`，**不在任务工作区里**——最早它和坏仓库放在一起，结果真实模型会在第一步读到答案（见 [docs/design.md](docs/design.md) 的踩坑记录）。
 
+**加一个新任务**需要三样东西：
+
+1. `evals/fixtures/<名字>/`：一个故意留了 bug 的小仓库（代码 + 现在是红的测试）
+2. `evals/tasks/<名字>.toml`：任务描述 + fixture 路径 + 判定命令（照抄 `off_by_one.toml` 改四行）
+3. `evals/scripts/<名字>.json`（可选）：离线剧本。没有剧本的任务在 `--fake` 模式下会被跳过，这样加任务不会顺手把 CI 弄红
+
+选任务的时候别选"同一个 bug 换个数字"，要覆盖不同的失败类型：边界条件、语言语义陷阱、状态与缓存、并发。
+
 ## 配置
 
 `mend init` 生成 `mend.toml`（带注释的完整版本见 [mend.example.toml](mend.example.toml)）。密钥只从环境变量或 `.env` 读，永远不写进配置文件。
