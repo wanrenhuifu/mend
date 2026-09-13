@@ -14,8 +14,8 @@ jobs:
         # 声明的是 >= 3.11，那就真的在 3.11 上测一遍，别让下限变成一句谎话
         python-version: ["3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
 
