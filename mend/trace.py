@@ -84,8 +84,15 @@ class Trace:
 
 
 def list_runs(root: Path | str) -> list[Path]:
+    """按修改时间倒序，而不是按文件名。
+
+    run id 里虽然带时间戳，但文件名以任务名开头，按文件名排序会把不同任务分成几段——
+    结果就是"最新的在前"这句承诺不成立：最新的运行可能被排在几十条之后看不见。
+    """
     directory = Path(root).resolve() / RUNS_DIR
-    return sorted(directory.glob("*.jsonl"), reverse=True) if directory.exists() else []
+    if not directory.exists():
+        return []
+    return sorted(directory.glob("*.jsonl"), key=lambda path: path.stat().st_mtime, reverse=True)
 
 
 def load_run(path: Path | str) -> list[dict[str, Any]]:

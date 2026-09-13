@@ -1,0 +1,6 @@
+id = "mutable_default"
+description = "history.py 的 add_event 在连续调用之间会串数据：请修好它，不要修改测试。"
+fixture = "evals/fixtures/mutable_default"
+test_command = "python -m pytest -q"
+expect = "pass"
+# 故意不给 fake_script：这道题只接真实模型跑，离线模式会把它标记为"跳过"

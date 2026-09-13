@@ -36,6 +36,9 @@ addopts = "-q"
 [tool.ruff]
 line-length = 110
 target-version = "py311"
+# evals/fixtures 里是"故意留了 bug 的小仓库"，lint 它们没有意义
+# （比如可变默认参数正是要被修掉的东西），不排除的话加一道题就会让 CI 变红
+extend-exclude = ["evals/fixtures"]
 
 [tool.ruff.lint]
 # 显式声明规则集，不吃 ruff 的默认值：ruff 每个大版本都会扩默认规则，
