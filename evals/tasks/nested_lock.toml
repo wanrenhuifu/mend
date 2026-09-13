@@ -1,0 +1,8 @@
+id = "nested_lock"
+description = "counter.add_twice() 会卡住不返回，请修好它，不要修改测试。"
+fixture = "evals/fixtures/nested_lock"
+test_command = "python -m pytest -q"
+expect = "pass"
+# 失败类型：并发（不可重入的锁 + 嵌套获取 -> 死锁），失败形态是"卡住"而不是断言失败
+# 两种都能过测试的修法：把 Lock 换成 RLock，或者让 add_twice 不再嵌套获取锁
+# （后者会丢掉"整个过程原子"的语义，这一层区别留给面试讲）

@@ -1,0 +1,7 @@
+id = "stale_cache"
+description = "Settings.set() 改完值之后 get() 还是读到旧值，请修好它，不要修改测试。"
+fixture = "evals/fixtures/stale_cache"
+test_command = "python -m pytest -q"
+expect = "pass"
+# 失败类型：状态与缓存（数据改了但缓存没失效）
+# 陷阱：最省事的"修法"是把缓存删掉，所以专门有一条测试确认缓存还在工作（lookups 计数）

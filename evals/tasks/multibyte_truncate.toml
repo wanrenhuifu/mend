@@ -1,0 +1,7 @@
+id = "multibyte_truncate"
+description = "preview.truncate() 把短中文串当成超长文本截断了，请修好它，不要修改测试。"
+fixture = "evals/fixtures/multibyte_truncate"
+test_command = "python -m pytest -q"
+expect = "pass"
+# 失败类型：编码与字符语义（字节长度和字符长度混用）
+# 陷阱：限制的是"字符数"，但代码先 encode 再数长度；只按 len(text) 判断才是对的
